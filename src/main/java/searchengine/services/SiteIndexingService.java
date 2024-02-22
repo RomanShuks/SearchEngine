@@ -2,9 +2,11 @@ package searchengine.services;
 
 import lombok.Getter;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import searchengine.model.Page;
-import searchengine.siteparsing.SiteParser;
+import searchengine.utils.ControllerHelper;
+import searchengine.utils.SiteParser;
 import searchengine.config.SitesList;
 import searchengine.repository.IndexRepository;
 import searchengine.repository.LemmaRepository;
@@ -32,14 +34,45 @@ public class SiteIndexingService {
     private IndexRepository indexRepository;
     @Autowired
     private SitesList sitesList;
+    ControllerHelper controllerHelper = new ControllerHelper();
 
     private static final String INDEXING = "INDEXING";
     private List<Thread> threads = new ArrayList<>();
     private List<ForkJoinPool> forkJoinPools = new ArrayList<>();
 
+    public ResponseEntity<String> start() {
+        ResponseEntity<String> result;
+        if (this.indexingIsStarted()) {
+            result = controllerHelper.resultError("Индексация уже запущена");
+        } else {
+            result = controllerHelper.resultOK();
+        }
+        return result;
+    }
+
+    public ResponseEntity<String> stop() {
+        ResponseEntity<String> result;
+        if (this.indexingIsStopped()) {
+            result = controllerHelper.resultError("Индексация не запущена");
+        } else {
+            result = controllerHelper.resultOK();
+        }
+        return result;
+    }
+
+    public ResponseEntity<String> startIndexPage(String url) {
+        ResponseEntity<String> result;
+        if (this.indexPage(url)) {
+            result = controllerHelper.resultOK();
+        } else {
+            result = controllerHelper.resultError("Данная страница находится за пределами сайтов, указанных в конфигурационном файле");
+        }
+        return result;
+    }
+
     public boolean indexingIsStarted() {
         AtomicBoolean indexing = new AtomicBoolean(false);
-        for (Site site : siteRepository.findAll()){
+        for (Site site : siteRepository.findAll()) {
             if (site.getStatus().equals(INDEXING)) {
                 indexing.set(true);
             }
@@ -61,21 +94,7 @@ public class SiteIndexingService {
                     SiteParser siteParser = new SiteParser(siteEntity.getUrl(),
                             siteEntity, sitesList, pageRepository,
                             lemmaRepository, indexRepository);
-                    try {
-                        ForkJoinPool forkJoinPool = new ForkJoinPool();
-                        forkJoinPools.add(forkJoinPool);
-                        forkJoinPool.invoke(siteParser);
-                        Page mainPage = pageRepository.findByPath(site.getUrl());
-                        if (mainPage.getPath().equals(site.getUrl())
-                                && mainPage.getCode() >= 400) {
-                            siteEntity.setLastError("Ошибка индексации: главная страница сайта недоступна");
-                            setFailedStatus(siteEntity);
-                        } else {
-                            setIndexedStatus(siteEntity);
-                        }
-                    } catch (CancellationException ex) {
-                        siteEntity.setLastError("Ошибка индексации: главная страница сайта недоступна");
-                    }
+                    indexForkOrSetError(siteParser, siteEntity, site);
                     siteParser.clearListOfLinks();
                 })));
         threads.forEach(Thread::start);
@@ -84,7 +103,7 @@ public class SiteIndexingService {
 
     public boolean indexingIsStopped() {
         AtomicBoolean indexing = new AtomicBoolean(false);
-        for (Site site : siteRepository.findAll()){
+        for (Site site : siteRepository.findAll()) {
             if (site.getStatus().equals(INDEXING)) {
                 indexing.set(true);
             }
@@ -95,7 +114,7 @@ public class SiteIndexingService {
         forkJoinPools.forEach(ForkJoinPool::shutdownNow);
         threads.forEach(Thread::interrupt);
         SiteParser.setStopIndexing(true);
-        for (Site site : siteRepository.findAll()){
+        for (Site site : siteRepository.findAll()) {
             site.setLastError("Индексация остановлена пользователем");
             setFailedStatus(site);
         }
@@ -107,29 +126,22 @@ public class SiteIndexingService {
 
     public boolean indexPage(String url) {
         AtomicBoolean addPage = new AtomicBoolean(false);
-        SiteParser.setStopIndexing(false);
-        for (searchengine.config.Site site : sitesList.getSites()){
-            if (url.contains(site.getUrl()) && siteRepository.findByUrl(site.getUrl()) == null) {
-                Site siteEntity = addSiteInRepository(site);
-                SiteParser siteParser = new SiteParser(url, siteEntity,
-                        sitesList, pageRepository,
-                        lemmaRepository, indexRepository);
-                siteParser.addAdditionalPage();
-                setIndexedStatus(siteEntity);
-                addPage.set(true);
-
-            } else if (url.contains(site.getUrl())) {
-                Site siteEntity = siteRepository.findByUrl(site.getUrl());
-                SiteParser siteParser = new SiteParser(url, siteEntity,
-                        sitesList, pageRepository,
-                        lemmaRepository, indexRepository);
-                siteEntity.setStatus(INDEXING);
-                siteParser.addAdditionalPage();
-                setIndexedStatus(siteEntity);
-                addPage.set(true);
+        if (isSiteInRepo(url)) {
+            SiteParser.setStopIndexing(false);
+            for (searchengine.config.Site site : sitesList.getSites()) {
+                indexSinglePage(site, url, addPage);
             }
         }
         return addPage.get();
+    }
+    private boolean isSiteInRepo(String url) {
+        String regex = "^(http(s)?://)?([\\w-]+\\.)+[\\w-]+(/[\\w- ./?%&=]*)?$";
+        for (searchengine.config.Site site : sitesList.getSites()) {
+            if (url.matches(regex) && (url.contains(site.getUrl()) || site.getUrl().contains(url))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public Site addSiteInRepository(searchengine.config.Site site) {
@@ -163,4 +175,42 @@ public class SiteIndexingService {
         SiteParser.setStopIndexing(false);
     }
 
+    private void indexForkOrSetError(SiteParser siteParser, Site siteEntity, searchengine.config.Site site) {
+        try {
+            ForkJoinPool forkJoinPool = new ForkJoinPool();
+            forkJoinPools.add(forkJoinPool);
+            forkJoinPool.invoke(siteParser);
+            Page mainPage = pageRepository.findByPath(site.getUrl());
+            if (mainPage.getPath().equals(site.getUrl())
+                    && mainPage.getCode() >= 400) {
+                siteEntity.setLastError("Ошибка индексации: главная страница сайта недоступна");
+                setFailedStatus(siteEntity);
+            } else {
+                setIndexedStatus(siteEntity);
+            }
+        } catch (CancellationException ex) {
+            siteEntity.setLastError("Ошибка индексации: главная страница сайта недоступна");
+        }
+    }
+
+    private void indexSinglePage(searchengine.config.Site site, String url, AtomicBoolean addPage ) {
+        if (siteRepository.findByUrl(site.getUrl()) == null) {
+            Site siteEntity = addSiteInRepository(site);
+            SiteParser siteParser = new SiteParser(url, siteEntity,
+                    sitesList, pageRepository,
+                    lemmaRepository, indexRepository);
+            siteParser.addAdditionalPage();
+            setIndexedStatus(siteEntity);
+            addPage.set(true);
+        } else {
+            Site siteEntity = siteRepository.findByUrl(site.getUrl());
+            SiteParser siteParser = new SiteParser(url, siteEntity,
+                    sitesList, pageRepository,
+                    lemmaRepository, indexRepository);
+            siteEntity.setStatus(INDEXING);
+            siteParser.addAdditionalPage();
+            setIndexedStatus(siteEntity);
+            addPage.set(true);
+        }
+    }
 }

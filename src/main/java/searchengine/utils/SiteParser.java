@@ -1,21 +1,23 @@
-package searchengine.siteparsing;
+package searchengine.utils;
 
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.springframework.stereotype.Component;
 import searchengine.config.SitesList;
-import searchengine.morphology.LemmaSearcher;
 import searchengine.model.Page;
 import searchengine.model.Site;
 import searchengine.repository.IndexRepository;
 import searchengine.repository.LemmaRepository;
 import searchengine.repository.PageRepository;
+
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.RecursiveTask;
+
 import static java.lang.Thread.sleep;
 
 public class SiteParser extends RecursiveTask<Integer> {
@@ -70,22 +72,11 @@ public class SiteParser extends RecursiveTask<Integer> {
             Document doc = response.parse();
             addPage(response, doc);
             Elements links = doc.select("a");
-            for (Element link : links) {
-                String url = link.attr("href");
-                if (!url.contains("http")) {
-                    if (!url.startsWith("/") && url.length() > 1) {
-                        url = "/" + url;
-                    }
-                    url = siteName + url;
-                }
-                if (isCorrected(url)) {
-                    addChild(url);
-                }
-            }
+            processingLinks(links);
         } catch (InterruptedException | IOException | NullPointerException ex) {
             ex.printStackTrace();
         }
-        for(SiteParser parser : children){
+        for (SiteParser parser : children) {
             pageCount += parser.join();
         }
         return pageCount;
@@ -144,6 +135,21 @@ public class SiteParser extends RecursiveTask<Integer> {
 
     public static void setStopIndexing(boolean stopIndexing) {
         SiteParser.stopIndexing = stopIndexing;
+    }
+
+    private void processingLinks(Elements links) {
+        for (Element link : links) {
+            String url = link.attr("href");
+            if (!url.contains("http")) {
+                if (!url.startsWith("/") && url.length() > 1) {
+                    url = "/" + url;
+                }
+                url = siteName + url;
+            }
+            if (isCorrected(url)) {
+                addChild(url);
+            }
+        }
     }
 }
 

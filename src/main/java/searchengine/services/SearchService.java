@@ -4,15 +4,18 @@ import lombok.Getter;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import searchengine.dto.search.DetailedSearchItem;
 import searchengine.dto.search.SearchResponse;
-import searchengine.morphology.KeywordSearcher;
-import searchengine.morphology.LemmaSearcher;
 import searchengine.model.Index;
 import searchengine.model.Lemma;
 import searchengine.model.Page;
 import searchengine.model.Site;
+import searchengine.utils.ControllerHelper;
+import searchengine.utils.KeywordSearcher;
+import searchengine.utils.LemmaSearcher;
 import searchengine.repository.IndexRepository;
 import searchengine.repository.LemmaRepository;
 import searchengine.repository.PageRepository;
@@ -35,7 +38,7 @@ public class SearchService {
     @Autowired
     private IndexRepository indexRepository;
     private final SearchResponse searchResponse = new SearchResponse();
-
+    ControllerHelper controllerHelper = new ControllerHelper();
 
     private int offset;
     private int limit;
@@ -43,42 +46,63 @@ public class SearchService {
     private int limitCounter;
     private String mostRareLemma;
 
-    public SearchResponse getSearchResults(String query, String site, int offset, int limit) {
-        this.limit = limit;
-        this.offset = offset;
-        count = 0;
-        limitCounter = 0;
-        ArrayList<String> words = new LemmaSearcher(query).getLemmasFromSearchQuery();
-        searchResponse.setResult(true);
-        searchResponse.setCount(0);
-        searchResponse.setData(new ArrayList<>());
 
-        if (words.isEmpty()) {
-            return searchResponse;
+    public ResponseEntity<?> getResult(String query, String site, int offset, int limit) {
+        ResponseEntity<?> result = null;
+        if (query == null || query.isBlank()) {
+            result = controllerHelper.resultError("Задан пустой поисковой запрос");
+        } else {
+            result = getIndexed(site);
         }
-        return handleRequest(words, site);
+        if (result == null) {
+            result = new ResponseEntity<>(this.getSearchResults(query, site, offset, limit), HttpStatus.OK);
+        }
+        return result;
     }
 
-    private SearchResponse handleRequest(ArrayList<String> words, String site) {
+    public SearchResponse getSearchResults(String query, String site, int offset, int limit) {
+        if (searchResponse.getData() != null) {
+            searchResponse.getData().clear();
+            searchResponse.setCount(0);
+        }
+        this.limit = limit;
+        this.offset = offset;
+        if (offset == 0) {
+            limitCounter = 0;
+            count = 0;
+        }
+        ArrayList<String> queryWords = new LemmaSearcher(query).getLemmasFromSearchQuery();
+        searchResponse.setResult(true);
+        searchResponse.setCount(limit);
+        searchResponse.setData(new ArrayList<>());
+        if (queryWords.isEmpty()) {
+            return searchResponse;
+        }
+        return handleRequest(queryWords, site);
+    }
+
+    private SearchResponse handleRequest(ArrayList<String> queryWords, String site) {
         List<Site> sites = new ArrayList<>();
         if (site == null) {
-            sites.addAll(siteRepository.findAll());
+            for (Site siteToSearch : siteRepository.findAll()) {
+                if (!siteToSearch.getStatus().equals("INDEXING")) {
+                    sites.add(siteToSearch);
+                }
+            }
         } else {
             sites.add(siteRepository.findByUrl(site));
         }
-        handleSites(sites, words);
+        handleSites(sites, queryWords);
         Map<Integer, Double> relevanceSorted = sortByValue(relevance);
         List<Integer> pageToResponse = new ArrayList<>(relevanceSorted.keySet());
         Collections.reverse(pageToResponse);
-        collectSearchItems(pageToResponse, words);
-        sortByRelevance(detailed);
-        offset();
+        collectSearchItems(pageToResponse, queryWords);
         return setDataInResponse();
     }
 
-    private void handleSites(List<Site> sites, ArrayList<String> words) {
+    private void handleSites(List<Site> sites, ArrayList<String> queryWords) {
         for (int i = 0; i < sites.size(); i++) {
-            HashMap<Lemma, Integer> lemmas = getLemmas(words, sites.get(i));
+            HashMap<Lemma, Integer> lemmas = getLemmas(queryWords, sites.get(i));
             if (lemmas.isEmpty()) {
                 continue;
             }
@@ -109,60 +133,51 @@ public class SearchService {
         return indexesFirstPage;
     }
 
-    public void collectSearchItems(List<Integer> pagesList, ArrayList<String> words) {
+    public void collectSearchItems(List<Integer> pagesList, ArrayList<String> queryWords) {
         ArrayList<String> titles = new ArrayList<>();
         if (pagesList.isEmpty()) {
             return;
         }
-        for (int i = 0; i < pagesList.size(); i++) {
-            if (limitCounter >= limit) {
-                break;
+        if (offset == 0) {
+            for (int i = 0; i < pagesList.size(); i++) {
+                int pageNumber = pagesList.get(i);
+                DetailedSearchItem searchItem = new DetailedSearchItem();
+                Page page = pageRepository.findById(pageNumber);
+                searchItem.setSite(page.getSite().getUrl());
+                searchItem.setSiteName(page.getSite().getName());
+                searchItem.setUri(page.getPath());
+                String title = getTitle(page.getPath());
+                if (!titles.isEmpty() && titles.contains(title)) {
+                    continue;
+                }
+                searchItem.setTitle(title);
+                titles.add(title);
+                searchItem.setRelevance(relevance.get(pageNumber));
+                searchItem.setSnippet(getSnippet(page.getContent(), queryWords));
+                detailed.add(searchItem);
+                limitCounter++;
+                count++;
             }
-            int pageNumber = pagesList.get(i);
-            DetailedSearchItem searchItem = new DetailedSearchItem();
-            Page page = pageRepository.findById(pageNumber);
-            searchItem.setSite(page.getSite().getUrl());
-            searchItem.setSiteName(page.getSite().getName());
-            searchItem.setUri(page.getPath());
-            String title = getTitle(page.getPath());
-            if (!titles.isEmpty() && titles.contains(title)) {
-                continue;
-            }
-            searchItem.setTitle(title);
-            titles.add(title);
-            searchItem.setRelevance(relevance.get(pageNumber));
-            searchItem.setSnippet(getSnippet(page.getContent(), words));
-            detailed.add(searchItem);
-            limitCounter++;
-            count++;
+            sortByRelevance(detailed);
         }
     }
 
     private void findMatchesWithRarePage(Map<Lemma, Integer> sortedLemmas, List<Integer> indexesFirstPage) {
-        for(Map.Entry<Lemma, Integer> entry :sortedLemmas.entrySet()){
+        for (Map.Entry<Lemma, Integer> entry : sortedLemmas.entrySet()) {
             ArrayList<Integer> indexesAnotherPage = new ArrayList<>();
-            for(Index index : indexRepository.findByLemma(entry.getKey())){
+            for (Index index : indexRepository.findByLemma(entry.getKey())) {
                 int pageNumber = index.getPage().getId();
                 indexesAnotherPage.add(pageNumber);
             }
-
-            for (int i = 0; i < indexesFirstPage.size(); i++) {
-                boolean flag = false;
-                int item = indexesFirstPage.get(i);
-                for (int j = 0; j < indexesAnotherPage.size(); j++) {
-                    if (item == indexesAnotherPage.get(j)) {
-                        flag = true;
-                    }
-                }
-                if (!flag) {
-                    indexesFirstPage.set(i, 0);
-                }
-            }
+            indexesPages(indexesFirstPage, indexesAnotherPage);
         }
     }
 
     private void getRelevance(List<Integer> pagesList, Map<Lemma, Integer> sortedLemmas) {
         Set<Lemma> lemmas = sortedLemmas.keySet();
+        if (offset == 0) {
+            relevance.clear();
+        }
         for (int pageNumber : pagesList) {
             Page page = pageRepository.findById(pageNumber);
             double counter = 0;
@@ -173,45 +188,33 @@ public class SearchService {
         }
     }
 
-    private String getSnippet(String content, ArrayList<String> words) {
-        KeywordSearcher keywordSearcher = new KeywordSearcher(Jsoup.parse(content).body().text(), words, mostRareLemma);
+    private String getSnippet(String content, ArrayList<String> queryWords) {
+        KeywordSearcher keywordSearcher = new KeywordSearcher(Jsoup.parse(content).body().text(), queryWords, mostRareLemma);
         Vector<String> snippetsWords = keywordSearcher.getWordsForSnippets();
         return String.valueOf(handlePhrase(snippetsWords, keywordSearcher.getKeyword()));
     }
 
+
     private StringBuilder handlePhrase(Vector<String> snippetsWords, int keyword) {
-        Set<String> snippetsWordsSet = new HashSet<>(snippetsWords);
         StringBuilder stringBuilder = new StringBuilder();
-        boolean hasFirst = false;
-        for (String word : snippetsWordsSet) {
-            while (stringBuilder.length() < 200) {
-                if (word.matches("(\\<b\\>)*[а-я]+(\\<b\\>)*") && hasFirst) {
-                    if(word.equals(snippetsWords.get(keyword))){
-                        stringBuilder.append(word).append(" ");
-                    }
-                    word = word.replace("^\\<b\\>","");
-                    word = word.replaceAll("\\</b\\>$","");
-                    stringBuilder.append(word).append(" ");
-                }
-                if(word.matches("(\\<b\\>)*[а-я]+(\\<b\\>)*") && !hasFirst){
-                    stringBuilder.append(word).append(" ");
-                    hasFirst = true;
-                }
-                break;
-            }
+        List<String> dirtySnippet = snippetsWords.subList(keyword, keyword + 30);
+        for (String word : dirtySnippet) {
+            stringBuilder.append(word.toLowerCase()).append(" ");
         }
         return stringBuilder;
     }
 
     private SearchResponse setDataInResponse() {
+        List<DetailedSearchItem> listToResponse;
         searchResponse.setResult(true);
+        searchResponse.setCount(count);
         if (detailed.size() <= limit) {
-            searchResponse.setData(detailed);
-            searchResponse.setCount(detailed.size());
+            listToResponse = new ArrayList<>(detailed);
         } else {
-            searchResponse.setCount(limit);
-            searchResponse.setData(detailed.subList(0, limit));
+            listToResponse = new ArrayList<>(detailed.subList(0, limit));
         }
+        searchResponse.setData(listToResponse);
+        detailed.removeAll(listToResponse);
         return searchResponse;
     }
 
@@ -225,17 +228,9 @@ public class SearchService {
         return doc.title();
     }
 
-    private void offset() {
-        if (offset != 0) {
-            for (int i = 0; i < offset; i++) {
-                detailed.remove(i);
-            }
-        }
-    }
-
-    private HashMap<Lemma, Integer> getLemmas(ArrayList<String> words, Site site) {
+    private HashMap<Lemma, Integer> getLemmas(ArrayList<String> queryWords, Site site) {
         HashMap<Lemma, Integer> lemmas = new HashMap<>();
-        for (String word : words) {
+        for (String word : queryWords) {
             Lemma lemma = lemmaRepository.findByLemmaAndSite(word, site);
             if (lemma == null) {
                 break;
@@ -267,6 +262,42 @@ public class SearchService {
             result.put(entry.getKey(), entry.getValue());
         }
         return result;
+    }
+
+    private void indexesPages(List<Integer> indexesFirstPage, ArrayList<Integer> indexesAnotherPage) {
+        for (int i = 0; i < indexesFirstPage.size(); i++) {
+            boolean flag = false;
+            int item = indexesFirstPage.get(i);
+            for (int j = 0; j < indexesAnotherPage.size(); j++) {
+                if (item == indexesAnotherPage.get(j)) {
+                    flag = true;
+                }
+            }
+            if (!flag) {
+                indexesFirstPage.set(i, 0);
+            }
+        }
+    }
+
+    private ResponseEntity<?> getIndexed(String site){
+        if (site == null) {
+            boolean indexed = false;
+            for (int i = 0; i < siteRepository.findAll().size(); i++) {
+                if (!siteRepository.findAll().get(i).getStatus().equals("INDEXING")) {
+                    indexed = true;
+                    break;
+                }
+            }
+            if (!indexed) {
+                return controllerHelper.resultError("Сайты индексируются");
+            }
+
+        } else {
+            if (siteRepository.findByUrl(site).getStatus().equals("INDEXING")) {
+                return controllerHelper.resultError("Сайт индексируется");
+            }
+        }
+        return null;
     }
 }
 

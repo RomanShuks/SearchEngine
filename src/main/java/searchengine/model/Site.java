@@ -24,6 +24,7 @@ public class Site {
     @Column(columnDefinition = "INT")
     private Integer id;
 
+    @NonNull
     @Column(columnDefinition = "ENUM('INDEXING', 'INDEXED', 'FAILED')")
     private String status;
 

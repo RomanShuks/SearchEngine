@@ -8,8 +8,6 @@ import java.util.ArrayList;
 
 public interface LemmaRepository extends JpaRepository<Lemma, Integer> {
     Lemma findByLemmaAndSite(String lemma, Site site);
-
     ArrayList<Lemma> findByLemma(String lemma);
-
     int countBySite(Site site);
 }

@@ -1449,7 +1449,7 @@ var API = function(){
             dataType: 'json',
             data: data,
             complete: function(result) {
-                if (result.status===200) {
+                if (result.status >= 200 && result.status <= 500) {
                     cb(result.responseJSON, $this, data);
                 } else {
                     alert('Ошибка ' + result.status);
@@ -1541,7 +1541,7 @@ var API = function(){
                     var scroll = $(window).scrollTop();
                     result.data.forEach(function(page){
                         $content.append('<div class="SearchResult-block">' +
-                            '<a href="' + page.uri +'" target="_blank" class="SearchResult-siteTitle">' +
+                            '<a href="' + page.site + page.uri +'" target="_blank" class="SearchResult-siteTitle">' +
                                 (!data.siteName ? page.siteName + ' - ': '') +
                                 page.title +
                             '</a>' +
@@ -1648,7 +1648,7 @@ var API = function(){
                             $this.removeClass('Tabs-block_update')
                         });
                     });
-                    if (result.statistics.total.indexing) {
+                    if (result.statistics.total.isIndexing) {
                         var $btnIndex = $('.btn[data-send="startIndexing"]'),
                             text = $btnIndex.find('.btn-content').text();
                         $btnIndex.find('.btn-content').text($btnIndex.data('alttext'));

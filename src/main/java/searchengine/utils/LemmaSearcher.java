@@ -1,6 +1,7 @@
-package searchengine.morphology;
+package searchengine.utils;
 
 import org.apache.lucene.morphology.LuceneMorphology;
+import org.springframework.stereotype.Component;
 import searchengine.model.Index;
 import searchengine.model.Lemma;
 import searchengine.model.Page;
@@ -9,13 +10,12 @@ import searchengine.repository.LemmaRepository;
 
 import java.util.*;
 
-import static searchengine.morphology.MorphService.getMorphService;
-
+import static searchengine.utils.MorphService.getMorphService;
+import static searchengine.utils.MorphService.isCyrillic;
+@Component
 public class LemmaSearcher {
-
-    private static LuceneMorphology luceneMorphology = getMorphService();
+    private static LuceneMorphology luceneMorphology;
     private static final String[] particlesNames = new String[]{"МЕЖД", "ПРЕДЛ", "СОЮЗ", "МС-П", " МС "};
-
     private static LemmaRepository lemmaRepository;
     private static IndexRepository indexRepository;
     private Page page;
@@ -38,10 +38,11 @@ public class LemmaSearcher {
         Vector<String> words;
         ArrayList<String> lemmas = new ArrayList<>();
         if (page == null) {
-            words = getRussianWordsList(query);
+            words = getWordsList(query);
         } else {
-            words = getRussianWordsList(page.getContent());
+            words = getWordsList(page.getContent());
         }
+        luceneMorphology = getMorphService(words.get(0));
         for (String word : words) {
             if (word.isBlank()) {
                 continue;
@@ -61,23 +62,10 @@ public class LemmaSearcher {
     }
 
     public void putLemmasInBase() {
-        for(String normalWord : getNormalWordsList()){
+        for (String normalWord : getNormalWordsList()) {
             Lemma lemma = lemmaRepository.findByLemmaAndSite(normalWord, page.getSite());
             Index index = indexRepository.findByPageAndLemma(page, lemma);
-            if (lemma != null) {
-                if (index != null) {
-                    float rank = index.getRank();
-                    index.setRank(rank + 1);
-                    indexRepository.save(index);
-                } else {
-                    putNewIndex(lemma);
-                    int frequency = lemma.getFrequency();
-                    lemma.setFrequency(frequency + 1);
-                    lemmaRepository.save(lemma);
-                }
-            } else {
-                putNewLemma(normalWord);
-            }
+            collectNormalWord(normalWord, lemma, index);
         }
     }
 
@@ -115,10 +103,37 @@ public class LemmaSearcher {
         return false;
     }
 
-    private Vector<String> getRussianWordsList(String text) {
-        return new Vector<>(Arrays.asList(text.toLowerCase(Locale.ROOT)
-                .replaceAll("[^а-я]+", " ")
-                .trim()
-                .split("\\s+")));
+    private Vector<String> getWordsList(String text) {
+        Vector<String> result;
+        if (isCyrillic(text)) {
+            result = new Vector<>(Arrays.asList(text.toLowerCase(Locale.ROOT)
+                    .replaceAll("[^а-я]+", " ")
+                    .trim()
+                    .split("\\s+")));
+
+        } else {
+            result = new Vector<>(Arrays.asList(text.toLowerCase(Locale.ROOT)
+                    .replaceAll("[^a-z]+", " ")
+                    .trim()
+                    .split("\\s+")));
+        }
+        return result;
+    }
+
+    private void collectNormalWord(String normalWord, Lemma lemma,Index index){
+        if (lemma != null) {
+            if (index != null) {
+                float rank = index.getRank();
+                index.setRank(rank + 1);
+                indexRepository.save(index);
+            } else {
+                putNewIndex(lemma);
+                int frequency = lemma.getFrequency();
+                lemma.setFrequency(frequency + 1);
+                lemmaRepository.save(lemma);
+            }
+        } else {
+            putNewLemma(normalWord);
+        }
     }
 }
