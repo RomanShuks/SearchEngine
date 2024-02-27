@@ -1,0 +1,42 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    username: user
+    password: pass
+    url: jdbc:mysql://localhost:3306/searchEngine?useSSL=false&requireSSL=false&allowPublicKeyRetrieval=true
+  jpa:
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+    hibernate:
+#        ddl-auto: create-drop
+        ddl-auto: update
+    show-sql: true
+
+indexing-settings:
+  sites:
+#    - url: https://www.dombulgakova.ru/
+#      name: Дом
+#    - url: https://gbu-lom.ru/
+#      name: Гбу
+    - url: https://msg-spb.ru/
+      name: МСГ
+    - url: https://www.nashe.ru/
+      name: Радио
+    - url: https://www.energyfm.ru/
+      name: Энергия
+    - url: https://newradio.ru/
+      name: Новое
+    - url: https://vgtrk.ru/
+      name: России
+#    - url: https://www.svetlovka.ru/
+#      name: Светлоков
+#    - url: https://www.blizzard.com/
+#      name: Blizz
+
+  user-agent: Mozilla/5.0 (Windows NT 6.1; rv:98.0) Gecko/20100101 Firefox/98.0
+  referrer: http://google.com
+  timeout-min: 50 # нижняя граница задержки между вызовом jsoup парсера в миллисекундах
+  timeout-max: 150 # верхняя граница задержки между вызовом jsoup парсера в миллисекундах
