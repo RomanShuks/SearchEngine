@@ -4,7 +4,6 @@ import org.apache.lucene.morphology.LuceneMorphology;
 
 import java.util.*;
 
-import static searchengine.utils.MorphService.getMorphService;
 
 public class KeywordSearcher extends LemmaSearcher {
     private final ArrayList<Integer> priorityKeywords = new ArrayList<>();
@@ -25,18 +24,9 @@ public class KeywordSearcher extends LemmaSearcher {
 
     private Vector<String> getKeyWordsList(Vector<String> contentWords) {
         Vector<String> contentWordsWithBold = null;
-        LuceneMorphology luceneMorphology = getMorphService(queryWords.get(0));
         for (String queryWord : queryWords) {
-//            Vector<String> bolded = new Vector<>();
-//            String queryWordNormalForm = luceneMorphology.getNormalForms(queryWord).get(0);
-//            for (String contentWord : contentWords) {
-//                String normalFormContentWord = getNormalWordForm(contentWord, luceneMorphology);
-//                if (normalFormContentWord != null && normalFormContentWord.equals(queryWordNormalForm) && !bolded.contains(contentWord)) {
-//                    contentWordsWithBold = setBoldWords(contentWords.indexOf(contentWord), normalFormContentWord, contentWord, contentWords);
-//                    bolded.add(contentWord);
-//                }
-//            }
-            contentWordsWithBold = getBoldedContent(queryWord, contentWordsWithBold, contentWords, luceneMorphology);
+            contentWordsWithBold = getBoldedContent(queryWord, contentWordsWithBold, contentWords,
+                    MorphService.getInstance().getMorphService(queryWords.get(0)));
         }
         if (contentWordsWithBold == null) {
             return contentWords;
@@ -44,6 +34,7 @@ public class KeywordSearcher extends LemmaSearcher {
             return contentWordsWithBold;
         }
     }
+
     String getNormalWordForm(String contentWord, LuceneMorphology luceneMorphology) {
         String contentWordLowerCase = contentWord.toLowerCase(Locale.ROOT)
                 .replaceAll("[^а-я]+", "").trim();
@@ -58,6 +49,7 @@ public class KeywordSearcher extends LemmaSearcher {
         }
         return null;
     }
+
     public Integer getKeyword() {
         int result;
         Random random = new Random();
@@ -72,6 +64,7 @@ public class KeywordSearcher extends LemmaSearcher {
         }
         return result;
     }
+
     private Vector<String> setBoldWords(int wordIndex, String normalForm, String parentWord, Vector<String> contentWords) {
         for (String keyWord : contentWords) {
             if (keyWord.equals(parentWord)) {
@@ -85,6 +78,7 @@ public class KeywordSearcher extends LemmaSearcher {
         }
         return contentWords;
     }
+
     private Vector<String> getBoldedContent(String queryWord, Vector<String> contentWordsWithBold, Vector<String> contentWords, LuceneMorphology luceneMorphology) {
         Vector<String> bolded = new Vector<>();
         String queryWordNormalForm = luceneMorphology.getNormalForms(queryWord).get(0);

@@ -13,16 +13,17 @@ import searchengine.model.Index;
 import searchengine.model.Lemma;
 import searchengine.model.Page;
 import searchengine.model.Site;
-import searchengine.utils.ControllerHelper;
-import searchengine.utils.KeywordSearcher;
-import searchengine.utils.LemmaSearcher;
 import searchengine.repository.IndexRepository;
 import searchengine.repository.LemmaRepository;
 import searchengine.repository.PageRepository;
 import searchengine.repository.SiteRepository;
+import searchengine.utils.ControllerHelper;
+import searchengine.utils.KeywordSearcher;
+import searchengine.utils.LemmaSearcher;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @Getter
@@ -45,22 +46,38 @@ public class SearchService {
     private int count;
     private int limitCounter;
     private String mostRareLemma;
+    private List<Site> allSites;
+    private List<Lemma> allLemmas;
 
+    private List<Lemma> getAllLemmas() {
+        if (allLemmas == null) {
+            allLemmas = lemmaRepository.findAll();
+        }
+        return allLemmas;
+    }
+ private List<Site> getAllSites() {
+        if (allSites == null) {
+            allSites = siteRepository.findAll();
+        }
+        return allSites;
+    }
 
     public ResponseEntity<?> getResult(String query, String site, int offset, int limit) {
-        ResponseEntity<?> result = null;
+        ResponseEntity<?> result;
         if (query == null || query.isBlank()) {
             result = controllerHelper.resultError("Задан пустой поисковой запрос");
         } else {
             result = getIndexed(site);
         }
         if (result == null) {
+            allLemmas = getAllLemmas();
             result = new ResponseEntity<>(this.getSearchResults(query, site, offset, limit), HttpStatus.OK);
         }
         return result;
     }
 
     public SearchResponse getSearchResults(String query, String site, int offset, int limit) {
+
         if (searchResponse.getData() != null) {
             searchResponse.getData().clear();
             searchResponse.setCount(0);
@@ -84,7 +101,7 @@ public class SearchService {
     private SearchResponse handleRequest(ArrayList<String> queryWords, String site) {
         List<Site> sites = new ArrayList<>();
         if (site == null) {
-            for (Site siteToSearch : siteRepository.findAll()) {
+            for (Site siteToSearch : getAllSites()) {
                 if (!siteToSearch.getStatus().equals("INDEXING")) {
                     sites.add(siteToSearch);
                 }
@@ -147,9 +164,6 @@ public class SearchService {
                 searchItem.setSiteName(page.getSite().getName());
                 searchItem.setUri(page.getPath());
                 String title = getTitle(page.getPath());
-                if (!titles.isEmpty() && titles.contains(title)) {
-                    continue;
-                }
                 searchItem.setTitle(title);
                 titles.add(title);
                 searchItem.setRelevance(relevance.get(pageNumber));
@@ -231,7 +245,11 @@ public class SearchService {
     private HashMap<Lemma, Integer> getLemmas(ArrayList<String> queryWords, Site site) {
         HashMap<Lemma, Integer> lemmas = new HashMap<>();
         for (String word : queryWords) {
-            Lemma lemma = lemmaRepository.findByLemmaAndSite(word, site);
+            Lemma lemma = null;
+            List<Lemma> lemList = allLemmas.stream().filter(s->s.getSite().equals(site)).filter(l -> l.getLemma().equals(word)).collect(Collectors.toList());
+            if(!lemList.isEmpty()){
+                lemma = lemList.get(0);
+            }
             if (lemma == null) {
                 break;
             }
@@ -279,11 +297,11 @@ public class SearchService {
         }
     }
 
-    private ResponseEntity<?> getIndexed(String site){
+    private ResponseEntity<?> getIndexed(String site) {
         if (site == null) {
             boolean indexed = false;
-            for (int i = 0; i < siteRepository.findAll().size(); i++) {
-                if (!siteRepository.findAll().get(i).getStatus().equals("INDEXING")) {
+            for (int i = 0; i < getAllSites().size(); i++) {
+                if (!getAllSites().get(i).getStatus().equals("INDEXING")) {
                     indexed = true;
                     break;
                 }

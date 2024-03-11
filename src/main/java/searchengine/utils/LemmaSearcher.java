@@ -10,8 +10,8 @@ import searchengine.repository.LemmaRepository;
 
 import java.util.*;
 
-import static searchengine.utils.MorphService.getMorphService;
 import static searchengine.utils.MorphService.isCyrillic;
+
 @Component
 public class LemmaSearcher {
     private static LuceneMorphology luceneMorphology;
@@ -28,8 +28,13 @@ public class LemmaSearcher {
         this.query = query;
     }
 
-    public LemmaSearcher(Page page, LemmaRepository lemmaRepository, IndexRepository indexRepository) {
-        this.page = page;
+//    public LemmaSearcher(Page page, LemmaRepository lemmaRepository, IndexRepository indexRepository) {
+//        this.page = page;
+//        LemmaSearcher.lemmaRepository = lemmaRepository;
+//        LemmaSearcher.indexRepository = indexRepository;
+//    }
+
+    public LemmaSearcher(LemmaRepository lemmaRepository, IndexRepository indexRepository) {
         LemmaSearcher.lemmaRepository = lemmaRepository;
         LemmaSearcher.indexRepository = indexRepository;
     }
@@ -42,7 +47,7 @@ public class LemmaSearcher {
         } else {
             words = getWordsList(page.getContent());
         }
-        luceneMorphology = getMorphService(words.get(0));
+        luceneMorphology = MorphService.getInstance().getMorphService(words.get(0));
         for (String word : words) {
             if (word.isBlank()) {
                 continue;
@@ -61,7 +66,8 @@ public class LemmaSearcher {
         return lemmas;
     }
 
-    public void putLemmasInBase() {
+    public void putLemmasInBase(Page page){
+        this.page = page;
         for (String normalWord : getNormalWordsList()) {
             Lemma lemma = lemmaRepository.findByLemmaAndSite(normalWord, page.getSite());
             Index index = indexRepository.findByPageAndLemma(page, lemma);
@@ -120,20 +126,20 @@ public class LemmaSearcher {
         return result;
     }
 
-    private void collectNormalWord(String normalWord, Lemma lemma,Index index){
-        if (lemma != null) {
-            if (index != null) {
-                float rank = index.getRank();
-                index.setRank(rank + 1);
-                indexRepository.save(index);
-            } else {
+    private void collectNormalWord(String normalWord, Lemma lemma, Index index) {
+        if (lemma == null) {
+            putNewLemma(normalWord);
+        } else {
+            if (index == null) {
                 putNewIndex(lemma);
                 int frequency = lemma.getFrequency();
                 lemma.setFrequency(frequency + 1);
                 lemmaRepository.save(lemma);
+            } else {
+                float rank = index.getRank();
+                index.setRank(rank + 1);
+                indexRepository.save(index);
             }
-        } else {
-            putNewLemma(normalWord);
         }
     }
 }

@@ -30,9 +30,8 @@ public class SiteParser extends RecursiveTask<Integer> {
 
     public static CopyOnWriteArraySet<String> allLinks = new CopyOnWriteArraySet<>();
     private static PageRepository pageRepository;
-    private static LemmaRepository lemmaRepository;
-    private static IndexRepository indexRepository;
     private static SitesList sitesList = new SitesList();
+    private static LemmaSearcher lemmaSearcher;
 
     private List<SiteParser> children;
 
@@ -52,8 +51,8 @@ public class SiteParser extends RecursiveTask<Integer> {
         allLinks.add(siteEntity.getUrl() + "/");
         SiteParser.sitesList = sitesList;
         SiteParser.pageRepository = pageRepository;
-        SiteParser.lemmaRepository = lemmaRepository;
-        SiteParser.indexRepository = indexRepository;
+        SiteParser.lemmaSearcher = new LemmaSearcher(lemmaRepository, indexRepository);
+
     }
 
     @Override
@@ -107,8 +106,8 @@ public class SiteParser extends RecursiveTask<Integer> {
         pageEntity.setSite(siteEntity);
         pageRepository.save(pageEntity);
         if (response.statusCode() < 400) {
-            LemmaSearcher lemmaSearcher = new LemmaSearcher(pageEntity, lemmaRepository, indexRepository);
-            lemmaSearcher.putLemmasInBase();
+//            LemmaSearcher lemmaSearcher = new LemmaSearcher(pageEntity, lemmaRepository, indexRepository);
+            lemmaSearcher.putLemmasInBase(pageEntity);
         }
     }
 

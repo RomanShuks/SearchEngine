@@ -39,8 +39,10 @@ public class SiteIndexingService {
     private static final String INDEXING = "INDEXING";
     private List<Thread> threads = new ArrayList<>();
     private List<ForkJoinPool> forkJoinPools = new ArrayList<>();
+    private List<Site> allSites;
 
     public ResponseEntity<String> start() {
+        allSites = siteRepository.findAll();
         ResponseEntity<String> result;
         if (this.indexingIsStarted()) {
             result = controllerHelper.resultError("Индексация уже запущена");
@@ -72,7 +74,7 @@ public class SiteIndexingService {
 
     public boolean indexingIsStarted() {
         AtomicBoolean indexing = new AtomicBoolean(false);
-        for (Site site : siteRepository.findAll()) {
+        for (Site site : allSites) {
             if (site.getStatus().equals(INDEXING)) {
                 indexing.set(true);
             }
@@ -103,7 +105,7 @@ public class SiteIndexingService {
 
     public boolean indexingIsStopped() {
         AtomicBoolean indexing = new AtomicBoolean(false);
-        for (Site site : siteRepository.findAll()) {
+        for (Site site : allSites) {
             if (site.getStatus().equals(INDEXING)) {
                 indexing.set(true);
             }
@@ -114,7 +116,7 @@ public class SiteIndexingService {
         forkJoinPools.forEach(ForkJoinPool::shutdownNow);
         threads.forEach(Thread::interrupt);
         SiteParser.setStopIndexing(true);
-        for (Site site : siteRepository.findAll()) {
+        for (Site site : allSites) {
             site.setLastError("Индексация остановлена пользователем");
             setFailedStatus(site);
         }
@@ -134,6 +136,7 @@ public class SiteIndexingService {
         }
         return addPage.get();
     }
+
     private boolean isSiteInRepo(String url) {
         String regex = "^(http(s)?://)?([\\w-]+\\.)+[\\w-]+(/[\\w- ./?%&=]*)?$";
         for (searchengine.config.Site site : sitesList.getSites()) {
@@ -193,7 +196,7 @@ public class SiteIndexingService {
         }
     }
 
-    private void indexSinglePage(searchengine.config.Site site, String url, AtomicBoolean addPage ) {
+    private void indexSinglePage(searchengine.config.Site site, String url, AtomicBoolean addPage) {
         if (siteRepository.findByUrl(site.getUrl()) == null) {
             Site siteEntity = addSiteInRepository(site);
             SiteParser siteParser = new SiteParser(url, siteEntity,
